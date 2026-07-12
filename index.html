@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>极端平移法演示</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; 
+            background-color: #f2f4f7; 
+            margin: 0; padding: 15px; 
+            display: flex; flex-direction: column; align-items: center; 
+            color: #333;
+        }
+        .header { text-align: center; margin-bottom: 15px; }
+        .header h2 { margin: 5px 0; font-size: 22px; color: #2c3e50; }
+        .header p { margin: 0; font-size: 14px; color: #7f8c8d; }
+        
+        .info-card { 
+            background: white; padding: 15px; border-radius: 12px; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05); 
+            width: 100%; max-width: 450px; text-align: center; margin-bottom: 15px; 
+        }
+        .area-text { font-size: 26px; font-weight: bold; color: #e74c3c; margin: 10px 0; }
+        
+        #canvas-container { 
+            position: relative; width: 100%; max-width: 450px; 
+            aspect-ratio: 1; touch-action: none; 
+        }
+        canvas { 
+            width: 100%; height: 100%; background: white; 
+            border-radius: 12px; box-shadow: 0 6px 16px rgba(0,0,0,0.08); 
+            cursor: grab;
+        }
+        canvas:active { cursor: grabbing; }
+        
+        .btn-group { display: flex; gap: 12px; width: 100%; max-width: 450px; margin-top: 15px; }
+        button { 
+            flex: 1; padding: 14px; border: none; border-radius: 10px; 
+            font-size: 16px; font-weight: bold; cursor: pointer; 
+            transition: all 0.2s; color: white; 
+        }
+        .btn-translate { background-color: #27ae60; box-shadow: 0 4px 0 #219a52; }
+        .btn-translate:active { transform: translateY(4px); box-shadow: 0 0 0 #219a52; }
+        .btn-reset { background-color: #2980b9; box-shadow: 0 4px 0 #2471a3; }
+        .btn-reset:active { transform: translateY(4px); box-shadow: 0 0 0 #2471a3; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h2>面积“极端平移”魔法</h2>
+        <p>适合五年级小学生的几何直观</p>
+    </div>
+
+    <div class="info-card">
+        <div>无论怎么拖动，阴影面积始终是：</div>
+        <div class="area-text" id="areaDisplay">79.5 平方厘米</div>
+        <div style="font-size: 13px; color: #999;">正方形边长: 12厘米</div>
+    </div>
+
+    <div id="canvas-container">
+        <!-- 内部渲染分辨率 800x800，保证手机高清屏不模糊 -->
+        <canvas id="geometryCanvas" width="800" height="800"></canvas>
+    </div>
+
+    <div class="btn-group">
+        <button class="btn-translate" onclick="startAutoTranslate()">一键极端平移至左下角</button>
+        <button class="btn-reset" onclick="resetPosition()">重置位置</button>
+    </div>
+    <p style="font-size: 13px; color: #777; margin-top: 15px; text-align: center;">
+        💡 提示：按住图中的橙色十字交点，可以自由拖动！
+    </p>
+
+    <script>
+        const canvas = document.getElementById('geometryCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // 坐标系配置
+        const SIZE = 800; // 内部画布总大小
+        const OFFSET = 100; // 边距，用来画标注
+        const SQUARE_SIZE = 600; // 正方形的渲染尺寸
+        const SCALE = SQUARE_SIZE / 12; // 1厘米对应的像素(50px)
+
+        // 核心变量：十字交点的坐标 (x, y)，范围分别是 [0,7] 和 [0,9]
+        let xc = 3; 
+        let yc = 4;
+        
+        // 交互状态
+        let isDragging = false;
+        let isAnimating = false;
+        let targetXc = 0;
+        let targetYc = 0;
+
+        // 数学坐标转 Canvas 坐标 (原点在左下角 OFFSET 处)
+        function toCanvasX(mathX) { return OFFSET + mathX * SCALE; }
+        function toCanvasY(mathY) { return OFFSET + SQUARE_SIZE - mathY * SCALE; }
+
+        function draw() {
+            ctx.clearRect(0, 0, SIZE, SIZE);
+
+            // 如果处于极端平移状态，高亮被减去的两个空白三角形
+            if (xc < 0.05 && yc < 0.05) {
+                // 右上角空白三角形 (底12，高9)
+                ctx.fillStyle = 'rgba(241, 196, 15, 0.2)'; // 浅黄色
+                ctx.beginPath();
+                ctx.moveTo(toCanvasX(0), toCanvasY(12));
+                ctx.lineTo(toCanvasX(12), toCanvasY(12));
+                ctx.lineTo(toCanvasX(12), toCanvasY(3));
+                ctx.closePath();
+                ctx.fill();
+
+                // 右下角空白三角形 (底7，高3)
+                ctx.beginPath();
+                ctx.moveTo(toCanvasX(5), toCanvasY(0));
+                ctx.lineTo(toCanvasX(12), toCanvasY(0));
+                ctx.lineTo(toCanvasX(12), toCanvasY(3));
+                ctx.closePath();
+                ctx.fill();
+            }
+
+            // 1. 画正方形外框
+            ctx.strokeStyle = '#2c3e50';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(OFFSET, OFFSET, SQUARE_SIZE, SQUARE_SIZE);
+
+            // 计算四个顶点坐标
+            const pLeft = { x: 0, y: yc };
+            const pBottom = { x: xc + 5, y: 0 };
+            const pRight = { x: 12, y: yc + 3 };
+            const pTop = { x: xc, y: 12 };
+            const pCenter = { x: xc, y: yc };
+
+            // 2. 画阴影多边形
+            ctx.fillStyle = 'rgba(52, 152, 219, 0.6)'; // 半透明蓝色
+            ctx.beginPath();
+            ctx.moveTo(toCanvasX(pLeft.x), toCanvasY(pLeft.y));
+            ctx.lineTo(toCanvasX(pBottom.x), toCanvasY(pBottom.y));
+            ctx.lineTo(toCanvasX(pRight.x), toCanvasY(pRight.y));
+            ctx.lineTo(toCanvasX(pTop.x), toCanvasY(pTop.y));
+            ctx.closePath();
+            ctx.fill();
+            
+            // 给阴影加个深色边框
+            ctx.strokeStyle = '#2980b9';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // 3. 画十字虚线
+            ctx.strokeStyle = '#34495e';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([12, 12]);
+            
+            // 水平虚线
+            ctx.beginPath();
+            ctx.moveTo(toCanvasX(0), toCanvasY(yc));
+            ctx.lineTo(toCanvasX(12), toCanvasY(yc));
+            ctx.stroke();
+            
+            // 垂直虚线
+            ctx.beginPath();
+            ctx.moveTo(toCanvasX(xc), toCanvasY(12));
+            ctx.lineTo(toCanvasX(xc), toCanvasY(0));
+            ctx.stroke();
+
+            // 画直角符号
+            ctx.setLineDash([]);
+            const raSize = 20;
+            ctx.beginPath();
+            ctx.moveTo(toCanvasX(xc), toCanvasY(yc) - raSize);
+            ctx.lineTo(toCanvasX(xc) + raSize, toCanvasY(yc) - raSize);
+            ctx.lineTo(toCanvasX(xc) + raSize, toCanvasY(yc));
+            ctx.stroke();
+
+            // 4. 画尺寸标注 "5" 和 "3"
+            ctx.fillStyle = '#333';
+            ctx.strokeStyle = '#333';
+            ctx.font = '32px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.lineWidth = 2;
+
+            // 标注底部距离 5 (垂直虚线到下顶点)
+            const bY = toCanvasY(0) + 40;
+            ctx.beginPath();
+            ctx.moveTo(toCanvasX(xc), bY);
+            ctx.lineTo(toCanvasX(xc + 5), bY);
+            ctx.moveTo(toCanvasX(xc), bY - 10); ctx.lineTo(toCanvasX(xc), bY + 10);
+            ctx.moveTo(toCanvasX(xc + 5), bY - 10); ctx.lineTo(toCanvasX(xc + 5), bY + 10);
+            ctx.stroke();
+            ctx.fillText('5', toCanvasX(xc + 2.5), bY + 30);
+
+            // 标注右侧距离 3 (水平虚线到右顶点)
+            const rX = toCanvasX(12) + 40;
+            ctx.beginPath();
+            ctx.moveTo(rX, toCanvasY(yc));
+            ctx.lineTo(rX, toCanvasY(yc + 3));
+            ctx.moveTo(rX - 10, toCanvasY(yc)); ctx.lineTo(rX + 10, toCanvasY(yc));
+            ctx.moveTo(rX - 10, toCanvasY(yc + 3)); ctx.lineTo(rX + 10, toCanvasY(yc + 3));
+            ctx.stroke();
+            ctx.fillText('3', rX + 30, toCanvasY(yc + 1.5));
+
+            // 如果到了极端位置，显示算式
+            if (xc < 0.05 && yc < 0.05) {
+                ctx.fillStyle = '#e74c3c';
+                ctx.font = 'bold 36px sans-serif';
+                ctx.fillText('144 - 10.5 - 54 = 79.5', SIZE / 2, SIZE / 2);
+            }
+
+            // 5. 画可拖动的控制点
+            ctx.fillStyle = '#e67e22'; // 橙色
+            ctx.beginPath();
+            ctx.arc(toCanvasX(xc), toCanvasY(yc), 16, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // 控制点外圈光晕
+            ctx.fillStyle = 'rgba(230, 126, 34, 0.4)';
+            ctx.beginPath();
+            ctx.arc(toCanvasX(xc), toCanvasY(yc), 30, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // --- 交互逻辑 ---
+        
+        function getEventPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            // 映射到内部 800x800 分辨率
+            const x = (clientX - rect.left) / rect.width * SIZE;
+            const y = (clientY - rect.top) / rect.height * SIZE;
+            return { x, y };
+        }
+
+        function handleStart(e) {
+            if(isAnimating) return;
+            const pos = getEventPos(e);
+            const cx = toCanvasX(xc);
+            const cy = toCanvasY(yc);
+            const dist = Math.hypot(pos.x - cx, pos.y - cy);
+            if (dist < 60) { // 扩大触摸热区
+                isDragging = true;
+                if(e.type === 'touchstart') e.preventDefault();
+            }
+        }
+
+        function handleMove(e) {
+            if (!isDragging || isAnimating) return;
+            e.preventDefault(); // 防止手机上滚动页面
+            const pos = getEventPos(e);
+            
+            // 反算回数学坐标系
+            let newXc = (pos.x - OFFSET) / SCALE;
+            let newYc = (OFFSET + SQUARE_SIZE - pos.y) / SCALE;
+
+            // 限制拖动范围 (保证顶点不超标)
+            xc = Math.max(0, Math.min(7, newXc));
+            yc = Math.max(0, Math.min(9, newYc));
+            draw();
+        }
+
+        function handleEnd(e) {
+            isDragging = false;
+        }
+
+        // 绑定鼠标事件
+        canvas.addEventListener('mousedown', handleStart);
+        window.addEventListener('mousemove', handleMove, { passive: false });
+        window.addEventListener('mouseup', handleEnd);
+
+        // 绑定触摸事件
+        canvas.addEventListener('touchstart', handleStart, { passive: false });
+        window.addEventListener('touchmove', handleMove, { passive: false });
+        window.addEventListener('touchend', handleEnd);
+
+        // --- 动画逻辑 ---
+        
+        function animateFrame() {
+            if (!isAnimating) return;
+            // 平滑插值动画 (Lerp)
+            xc += (targetXc - xc) * 0.1;
+            yc += (targetYc - yc) * 0.1;
+            
+            if (Math.abs(targetXc - xc) < 0.01 && Math.abs(targetYc - yc) < 0.01) {
+                xc = targetXc;
+                yc = targetYc;
+                isAnimating = false;
+            }
+            draw();
+            if (isAnimating) requestAnimationFrame(animateFrame);
+        }
+
+        window.startAutoTranslate = function() {
+            if (isAnimating) return;
+            targetXc = 0;
+            targetYc = 0;
+            isAnimating = true;
+            animateFrame();
+        }
+
+        window.resetPosition = function() {
+            if (isAnimating) return;
+            targetXc = Math.random() * 4 + 1; // 随机回落位置
+            targetYc = Math.random() * 5 + 2;
+            isAnimating = true;
+            animateFrame();
+        }
+
+        // 初始化绘制
+        draw();
+    </script>
+</body>
+</html>
